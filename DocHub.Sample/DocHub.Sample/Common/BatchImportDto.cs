@@ -7,7 +7,7 @@ public class BatchImportDto
     public int? UploadedByUserId { get; set; }
     public int NumberOfRecords { get; set; }
     public string? Name { get; set; }
-    public List<DocumentDto> Documents { get; set; } = new();
+    public List<DocumentDto> Documents { get; set; } = [];
 }
 
 public class DocumentDto
@@ -26,6 +26,54 @@ public class DocumentDto
     public string? No { get; set; }
     public string? Subject { get; set; }
     public string? DownloadUrl { get; set; }
+    public StatusDto? Status { get; set; }
+    public WaitingProcessDto? WaitingProcess { get; set; }
+    public List<Process>? Processes { get; set; }
+}
+
+public class Process
+{
+    public string? Id { get; set; }
+    public DateTime CreatedDate { get; set; }
+    public int ComId { get; set; }
+    public bool IsOrder { get; set; }
+    public int OrderNo { get; set; }
+    public int PageSign { get; set; }
+    public string? Position { get; set; }
+    public Status? DisplayType { get; set; }
+    public Status? AccessPermission { get; set; }
+    public Status? Status { get; set; }
+    public int ProcessedByUserId { get; set; }
+    public string? DocumentId { get; set; }
+    public List<object>? FillingItems { get; set; }
+}
+
+public class Status
+{
+    public int Value { get; set; }
+    public string? Description { get; set; }
+}
+
+public class WaitingProcessDto
+{
+    public Guid Id { get; set; }
+    public DateTime? CreatedDate { get; set; }
+    public int ComId { get; set; }
+    public bool IsOrder { get; set; }
+    public int OrderNo { get; set; }
+    public int PageSign { get; set; }
+    public string? Position { get; set; }
+    public StatusDto? DisplayType { get; set; }
+    public StatusDto? AccessPermission { get; set; }
+    public StatusDto? Status { get; set; }
+    public int ProcessedByUserId { get; set; }
+    public string? DocumentId { get; set; }
+}
+
+public class StatusDto
+{
+    public int Value { get; set; }
+    public string? Description { get; set; }
 }
 
 public class CreateBatchImportDataDto
@@ -34,8 +82,8 @@ public class CreateBatchImportDataDto
     public int? DepartmentId { get; set; }
     public int? DocumentTypeId { get; set; }
     public int? DocumentTemplateId { get; set; }
-    public List<string> Parameters { get; set; }
-    public List<List<string>> Rows { get; set; }
+    public List<string> Parameters { get; set; } = [];
+    public List<List<string>> Rows { get; set; } = [];
 }
 
 public class DocumentTemplateDto
@@ -44,7 +92,9 @@ public class DocumentTemplateDto
     public string? Name { get; set; }
     public List<DocumentTemplatePlaceHolderDto>? FillableFields { get; set; }
     public DateTime? CreatedDate { get; set; }
+
     public string? FileName { get; set; }
+
     //public UserDto? CreatedByUser { get; set; }
     public string? DownloadUrl { get; set; }
     public string? PdfDownloadUrl { get; set; }
@@ -56,6 +106,7 @@ public class DocumentTemplatePlaceHolderDto
     //public int Id { get; set; }
     public string? Key { get; set; }
     public string? Name { get; set; }
+
     public string? Description { get; set; }
     //public int DocumentTemplateId { get; set; }
 }

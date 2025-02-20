@@ -3,24 +3,224 @@ using DocHub.Sample.Service;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.VisualBasic;
+using System.Text.Json;
 
 namespace DocHub.Sample;
 
-class Program
+static class Program
 {
-    public async static Task Main(string[] args)
+    private static readonly DocHubService DocHubService = new();
+
+    public static async Task Main(string[] args)
     {
-        using IHost host = Host.CreateDefaultBuilder(args).Build();
-        IConfiguration config = host.Services.GetRequiredService<IConfiguration>();
-
+        using var host = Host.CreateDefaultBuilder(args).Build();
+        var config = host.Services.GetRequiredService<IConfiguration>();
         var appConfig = config.GetSection("AppConfiguration").Get<AppConfiguration>();
+        // [1] - Xác thực + Chọn công ty => lấy thông tin access token
+        await Authenticate(appConfig);
 
-        //Tạo chứng từ từ mẫu
-        //await BatchImport(appConfig);
+        // [2] - Tạo chứng từ
+        // [2.2] - Tạo từ mẫu import theo lô 
+        //      await BatchImport(appConfig);
 
-        //Tạo chứng từ từ tệp tin pdf
-        await CreateDocument(appConfig);
+        // [2.1] - Tạo chứng từ (tạo từ pdf)
+        var documentResult = await CreateDocument(appConfig.FileDocument!);
+
+        // [3] - Cập nhật quy trình chứng từ
+        var updateProcessDocResult = await UpdateDocumentProcessAsync($"{documentResult?.Data?.Id}");
+
+        // [4] - Gửi quy trình chứng từ
+        await SendProcess($"{documentResult?.Data?.Id}");
+
+        // [5] - Lấy danh sách chứng từ (lấy chứng từ vừa tạo)  
+        var documentWaitingProcessResult = await GetDocument($"{documentResult?.Data?.No}");
+
+        //  [5.1] -Trả kết quả (waitingProcess)
+        string strWaitingProcess = JsonSerializer.Serialize(
+            documentWaitingProcessResult.Data!.Items[0].WaitingProcess,
+            new JsonSerializerOptions { WriteIndented = true });
+        Utilities.ConsoleWriteLine($"\r\n\r\n::::[Waiting Process]::::{strWaitingProcess}", ConsoleColor.Blue);
+        Utilities.ConsoleWriteLine("\r\n\r\n::::LOOP::::", ConsoleColor.Blue);
+
+        // [6] Xử lý chứng từ 
+        // [6.1] Xử lý chứng từ [Approve] xác nhận xử lý chứng từ 
+        using (var processDto = new ProcessDto
+        {
+            ProcessId = updateProcessDocResult!.Data!.Processes![0].Id,
+            Otp = null,
+            Reason = "Đồng ý",
+            Reject = false,
+            SignatureDisplayMode = 3,
+            SignatureImage =
+                    "data:image/png;base64,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",
+            SigningPage = 1,
+            SigningPosition = "10,110,202,200",
+            SignatureText = "Nguyen Van A",
+            FontSize = 12,
+            ShowReason = false,
+            ConfirmTermsConditions = true,
+        })
+        {
+            var processOtpResult = await Process(processDto);
+
+            // [6.1.1] Xử lý chứng từ [Approve] (trường hợp có OTP)
+            if (processOtpResult.Data!.ReceiveOtpMethod != ReceiveOtpMethod.None.GetCode())
+            {
+                Utilities.ConsoleWriteLine(
+                    $"OTP sent to {ReceiveOtpMethodExtensions.FromCode(processOtpResult.Data.ReceiveOtpMethod!.Value)} . " +
+                    $"{(processOtpResult.Data.ReceiveOtpMethod!.Value == ReceiveOtpMethod.Email.GetCode() ? "Address" : "Phone")} " +
+                    $"{(processOtpResult.Data.ReceiveOtpMethod!.Value == ReceiveOtpMethod.Email.GetCode() ? $"{processOtpResult.Data.ReceiveOtpEmail}" : $"{processOtpResult.Data.ReceiveOtpPhone}")} " +
+                    $"[Approve] No: {{{documentResult!.Data!.No}}}",
+                    ConsoleColor.Green
+                );
+                Utilities.ConsoleWriteLine("- Please enter OTP to confirm. (OTP is valid within 5 minutes))",
+                    ConsoleColor.Green);
+                string otp;
+                do
+                {
+                    /*loop sai otp*/
+                    otp = Utilities.ReadInput();
+                    processDto.Otp = otp;
+                    var resultOtp = await Process(processDto);
+                    if (resultOtp.Messages[0].ToLower().Equals("invalid otp"))
+                    {
+                        Utilities.ConsoleWriteLine("Invalid OTP. Please try again.", ConsoleColor.Red);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                } while (true);
+            }
+            else
+            {
+                Utilities.ConsoleWriteLine(
+                    "You have not registered to receive {sign, approve the use of 2-factor authentication}, Please contact admin!",
+                    ConsoleColor.Red);
+            }
+        }
+
+        // [6.2] Xử lý chứng từ [SignDraw] Ký nháy 
+        using (ProcessDto processDto = new ProcessDto
+        {
+            ProcessId = updateProcessDocResult!.Data!.Processes![1].Id,
+            Otp = null,
+            Reject = false,
+            Reason = "Đồng ý",
+            SignatureDisplayMode = 3,
+            SignatureImage =
+                       "data:image/png;base64,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",
+            SigningPage = 1,
+            SigningPosition = "10,110,202,200",
+            SignatureText = "Nguyen Van A1",
+            FontSize = 12,
+            ShowReason = false,
+            ConfirmTermsConditions = true,
+        })
+        {
+            // [6.2.1] Xử lý chứng từ [SignDraw] Ký nháy (có OTP)
+            var processOtpResult = await Process(processDto);
+            if (processOtpResult.Data!.ReceiveOtpMethod != ReceiveOtpMethod.None.GetCode())
+            {
+                Utilities.ConsoleWriteLine(
+                    $"OTP sent to {ReceiveOtpMethodExtensions.FromCode(processOtpResult.Data.ReceiveOtpMethod!.Value)} . " +
+                    $"{(processOtpResult.Data.ReceiveOtpMethod!.Value == ReceiveOtpMethod.Email.GetCode() ? "Address" : "Phone")} " +
+                    $"{(processOtpResult.Data.ReceiveOtpMethod!.Value == ReceiveOtpMethod.Email.GetCode() ? $"{processOtpResult.Data.ReceiveOtpEmail}" : $"{processOtpResult.Data.ReceiveOtpPhone}")} " +
+                    $"[SignDraw] No: {{{documentResult!.Data!.No}}}",
+                    ConsoleColor.Green
+                );
+                Utilities.ConsoleWriteLine("- Please enter OTP to confirm. (OTP is valid within 5 minutes))",
+                    ConsoleColor.Green);
+                string otp;
+                do
+                {
+                    otp = Utilities.ReadInput();
+                    processDto.Otp = otp;
+                    var resultOtp = await Process(processDto);
+                    if (resultOtp.Messages[0].ToLower().Equals("invalid otp"))
+                    {
+                        Utilities.ConsoleWriteLine("Invalid OTP. Please try again.", ConsoleColor.Red);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                } while (true);
+            }
+            else
+            {
+                Utilities.ConsoleWriteLine(
+                    "You have not registered to receive {sign, approve the use of 2-factor authentication}, Please contact admin!",
+                    ConsoleColor.Red);
+            }
+        }
+
+        // [6.3] Xử lý chứng từ [ESign] Ký điện tử
+        using (ProcessDto processDto = new ProcessDto
+        {
+            ProcessId = updateProcessDocResult!.Data!.Processes![2].Id,
+            Otp = null,
+            Reject = false,
+            SignatureDisplayMode = 3,
+            SignatureImage =
+                       "data:image/png;base64,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",
+            SigningPage = 1,
+            Reason = "Đồng ý",
+            SigningPosition = "10,110,202,200",
+            SignatureText = "Nguyen Van A2",
+            FontSize = 12,
+            ShowReason = false,
+            ConfirmTermsConditions = true,
+        })
+        {
+            // [6.3.1] Xử lý chứng từ [ESign] Ký điện tử (có OTP)
+            var processOtpResult = await Process(processDto);
+            if (processOtpResult.Data!.ReceiveOtpMethod != ReceiveOtpMethod.None.GetCode())
+            {
+                Utilities.ConsoleWriteLine(
+                    $"OTP sent to {ReceiveOtpMethodExtensions.FromCode(processOtpResult.Data.ReceiveOtpMethod!.Value)} . " +
+                    $"{(processOtpResult.Data.ReceiveOtpMethod!.Value == ReceiveOtpMethod.Email.GetCode() ? "Address" : "Phone")} " +
+                    $"{(processOtpResult.Data.ReceiveOtpMethod!.Value == ReceiveOtpMethod.Email.GetCode() ? $"{processOtpResult.Data.ReceiveOtpEmail}" : $"{processOtpResult.Data.ReceiveOtpPhone}")} " +
+                    $"[ESign] No: {{{documentResult!.Data!.No}}}",
+                    ConsoleColor.Green
+                );
+                Utilities.ConsoleWriteLine("- Please enter OTP to confirm. (OTP is valid within 5 minutes))",
+                    ConsoleColor.Green);
+                string otp;
+                do
+                {
+                    otp = Utilities.ReadInput();
+                    processDto.Otp = otp;
+                    var resultOtp = await Process(processDto);
+                    if (resultOtp.Messages[0].ToLower().Equals("invalid otp"))
+                    {
+                        Utilities.ConsoleWriteLine("Invalid OTP. Please try again.", ConsoleColor.Red);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                } while (true);
+            }
+            else
+            {
+                Utilities.ConsoleWriteLine(
+                    "You have not registered to receive {sign, approve the use of 2-factor authentication}, Please contact admin!",
+                    ConsoleColor.Red);
+            }
+        }
+        Utilities.ConsoleWriteLine("::::END LOOP::::\r\n\r\n", ConsoleColor.Blue);
+        
+        // [7] Gửi thông báo chứng từ xử lý hoàn tất - optional => tuỳ thuộc vào cấu hình gửi thông báo
+        await SendNotify($"{documentResult!.Data!.Id}");
+
+        // [8] Lấy danh sách chứng từ  
+        var documentSatatus = await GetDocument($"{documentResult?.Data?.No}");
+        
+        // [8.1] - Kiểm tra trạng thái chứ từ
+        string statusDoc = JsonSerializer.Serialize(documentSatatus.Data!.Items[0].Status,
+            new JsonSerializerOptions { WriteIndented = true });
+        Utilities.ConsoleWriteLine($"\r\n\r\n::::[Status Document]::::{statusDoc}", ConsoleColor.Blue);
     }
 
     /// <summary>
@@ -28,7 +228,7 @@ class Program
     /// </summary>
     /// <param name="appConfig"></param>
     /// <returns></returns>
-    private async static Task BatchImport(AppConfiguration appConfig)
+    private static async Task BatchImport(AppConfiguration appConfig)
     {
         var username = appConfig.UserName;
         var password = appConfig.Password;
@@ -37,8 +237,8 @@ class Program
 
         // Site 213
         var documentTemplateId = 1141; // lấy từ api danh sách mẫu chứng từ (/api/document-templates)
-        var documentTypeId = 1089;// lấy từ api danh sách loại chứng từ (/api/document-types)
-        var departmentId = 33;// lấy từ api danh sách bộ phận (/api/departments)
+        var documentTypeId = 1089; // lấy từ api danh sách loại chứng từ (/api/document-types)
+        var departmentId = 33; // lấy từ api danh sách bộ phận (/api/departments)
         var userCode = "baoth";
 
         // Dữ liệu mẫu đã chuẩn bị cho CÔNG TY CỔ PHẦN CẤP NƯỚC CHỢ LỚN
@@ -63,7 +263,6 @@ class Program
         batchImportData.DocumentTemplateId = documentTemplateId;
         batchImportData.DocumentTypeId = documentTypeId;
         batchImportData.DepartmentId = departmentId;
-
 
         // parameters - các tham số - các tham số phải đúng thứ tự
         // 6 tham số đầu là bắt buộc - ko được thay đổi thứ tự
@@ -151,22 +350,11 @@ class Program
     /// </summary>
     /// <param name="appConfig"></param>
     /// <returns></returns>
-    private async static Task CreateDocument(AppConfiguration appConfig)
+    private static async Task<Result<DocumentDto>> CreateDocument(string fileDoc)
     {
-        var username = appConfig.UserName;
-        var password = appConfig.Password;
-        var comId = appConfig.CompanyId;
-        var baseUrl = appConfig.BaseUrl;
-
         // Site 213
-        var documentTypeId = 54;// lấy từ api danh sách loại chứng từ (/api/document-types)
-        var departmentId = 33;// lấy từ api danh sách bộ phận (/api/departments)
-
-        var docHubService = new DocHubService();
-
-        // Xác thực
-        var authResult = await docHubService.AuthenticateAsync(username, password, comId, baseUrl);
-        Console.WriteLine(authResult.Messages[0]);
+        var documentTypeId = 54; // lấy từ api danh sách loại chứng từ (/api/document-types)
+        var departmentId = 33; // lấy từ api danh sách bộ phận (/api/departments)
 
         // Tạo mới chứng từ
         var randomText = Guid.NewGuid().ToString()[..4].ToUpper();
@@ -177,11 +365,12 @@ class Program
         request.Subject = "Chứng từ thử nghiệm " + randomText;
         request.Description = "Chứng từ thử nghiệm";
 
-        request.FileInfo.FileName = "sample.pdf";
-
+        //request.FileInfo.FileName = "sample.pdf";
+        request.FileInfo.FileName = $"{fileDoc}";
         //---------------------------------
         // Trường hợp sử dụng đường dẫn tệp tin chứng từ cố định
-        request.FileInfo.FilePath = "./sample.pdf";
+        //request.FileInfo.FilePath = "./sample.pdf";
+        request.FileInfo.FilePath = $"./{fileDoc}";
         //---------------------------------
 
         //---------------------------------
@@ -190,10 +379,101 @@ class Program
         //request.FileInfo.File = System.Convert.FromBase64String(base64String);
         //---------------------------------
 
-        var createResult = await docHubService.CreateDocumentAsync(request);
+        var createResult = await DocHubService.CreateDocumentAsync(request);
         Console.WriteLine(createResult.Messages[0]);
+        return createResult;
+    }
+
+    /// <summary>
+    /// Cập nhật quy trình chứng từ
+    /// </summary>
+    /// <param name="appConfig"></param>
+    /// <returns></returns>
+    private static async Task<Result<DocumentDto>> UpdateDocumentProcessAsync(string docId)
+    {
+        // danh sách thành viên
+        var request = new UpdateProcessDocumentRequest
+        {
+            Id = docId,
+            ProcessInOrder = true,
+            Processes =
+            [
+                new(orderNo: 1, processedByUserCode: "BAOTH", accessPermissionCode: "A",
+                    position: "14,478,206,568", pageSign: 1), //A là phê duyệt 
+
+                new(orderNo: 2, processedByUserCode: "BAOTH", accessPermissionCode: "DR",
+                    position: "14,478,206,568", pageSign: 1), //DR là ký nháy
+
+                new(orderNo: 3, processedByUserCode: "BAOTH", accessPermissionCode: "E",
+                    position: "14,478,206,568", pageSign: 1) //D là ký điện tử
+
+            ]
+        };
+        var uProcessResult = await DocHubService.UpdateProcessDocumentAsync(request);
+        Console.WriteLine(uProcessResult.Messages[0]);
+        return uProcessResult;
+    }
+
+    /// <summary>
+    /// Gửi quy trình chứng từ
+    /// </summary>
+    /// <param name="appConfig"></param>
+    /// <returns></returns>
+    private static async Task<Result<DocumentDto>> SendProcess(string docId)
+    {
+        var uProcessResult = await DocHubService.SendProcessDocumentAsync(docId);
+        Console.WriteLine(uProcessResult.Messages[0]);
+        return uProcessResult;
+    }
+
+    /// <summary>
+    /// Lấy danh sách chứng từ
+    /// </summary>
+    /// <param name="appConfig"></param>
+    /// <returns></returns>
+    private static async Task<Result<DocumentsRequest>> GetDocument(string no)
+    {
+        var uProcessResult = await DocHubService.GetDocumentAsync(no);
+        return uProcessResult;
+    }
+
+    /// <summary>
+    /// Xử lý chứng từ
+    /// Mục đích
+    /// Hàm thực hiện xử lý chứng từ theo quy trình, bao gồm: ký và phê duyệt chứng từ.
+    /// </summary>
+    /// <param name="appConfig"></param>
+    /// <returns></returns>
+    private static async Task<Result<ProcessRespone>> Process(ProcessDto processDto)
+    {
+        var uProcessResult = await DocHubService.ProcessAsync(processDto);
+        Console.WriteLine(uProcessResult.Messages[0]);
+        return uProcessResult;
+    }
+
+    /// <summary>
+    /// Gửi thông báo chứng từ xử lý hoàn tất
+    /// Mục đích
+    ///     - Gửi thông báo chứng từ đã được xử lý hoàn tất đến email/sms cho người tạo hoặc tất cả người dùng trong quy trình xử lý chứng từ (Thông qua cấu hình CompletedDocumentNotification của hệ thống)
+    /// </summary>
+    /// <param name="appConfig"></param>
+    /// <returns></returns>
+    private static async Task<Result<DocumentDto>> SendNotify(string docId)
+    {
+        var senNotifyResult = await DocHubService.SendNotifyAsync(docId);
+        Console.WriteLine(senNotifyResult.Messages[0]);
+        return senNotifyResult;
+    }
+
+    private static async Task<Result<String>> Authenticate(AppConfiguration appConfig)
+    {
+        var username = appConfig.UserName;
+        var password = appConfig.Password;
+        var comId = appConfig.CompanyId;
+        var baseUrl = appConfig.BaseUrl;
+
+        var authResult = await DocHubService.AuthenticateAsync(username, password, comId, baseUrl);
+        Console.WriteLine(authResult.Messages[0]);
+        return authResult;
     }
 }
-
-
-
