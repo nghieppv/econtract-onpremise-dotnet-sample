@@ -16,26 +16,26 @@ static class Program
         using var host = Host.CreateDefaultBuilder(args).Build();
         var config = host.Services.GetRequiredService<IConfiguration>();
         var appConfig = config.GetSection("AppConfiguration").Get<AppConfiguration>();
-        // [1] - Xác thực + Chọn công ty => lấy thông tin access token
+        // [1] Xác thực + Chọn công ty => lấy thông tin access token
         await Authenticate(appConfig);
 
-        // [2] - Tạo chứng từ
-        // [2.2] - Tạo từ mẫu import theo lô 
+        // [2] Tạo chứng từ
+        // [2.2] Tạo từ mẫu import theo lô 
         //      await BatchImport(appConfig);
 
-        // [2.1] - Tạo chứng từ (tạo từ pdf)
+        // [2.1] Tạo chứng từ (tạo từ pdf)
         var documentResult = await CreateDocument(appConfig.FileDocument!);
 
-        // [3] - Cập nhật quy trình chứng từ
+        // [3] Cập nhật quy trình chứng từ
         var updateProcessDocResult = await UpdateDocumentProcessAsync($"{documentResult?.Data?.Id}");
 
-        // [4] - Gửi quy trình chứng từ
+        // [4] Gửi quy trình chứng từ
         await SendProcess($"{documentResult?.Data?.Id}");
 
-        // [5] - Lấy danh sách chứng từ (lấy chứng từ vừa tạo)  
+        // [5] Lấy danh sách chứng từ (lấy chứng từ vừa tạo)  
         var documentWaitingProcessResult = await GetDocument($"{documentResult?.Data?.No}");
 
-        //  [5.1] -Trả kết quả (waitingProcess)
+        //  [5.1] Trả kết quả (waitingProcess)
         string strWaitingProcess = JsonSerializer.Serialize(
             documentWaitingProcessResult.Data!.Items[0].WaitingProcess,
             new JsonSerializerOptions { WriteIndented = true });
@@ -217,7 +217,7 @@ static class Program
         // [8] Lấy danh sách chứng từ  
         var documentSatatus = await GetDocument($"{documentResult?.Data?.No}");
         
-        // [8.1] - Kiểm tra trạng thái chứ từ
+        // [8.1] - Kiểm tra trạng thái chứng từ
         string statusDoc = JsonSerializer.Serialize(documentSatatus.Data!.Items[0].Status,
             new JsonSerializerOptions { WriteIndented = true });
         Utilities.ConsoleWriteLine($"\r\n\r\n::::[Status Document]::::{statusDoc}", ConsoleColor.Blue);
